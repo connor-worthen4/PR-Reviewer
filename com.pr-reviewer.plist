@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  PR Reviewer - launchd configuration for macOS
+
+  Setup:
+    1. Edit the paths below to match your system:
+       - Replace YOUR_NODE_PATH with output of: which node
+       - Replace YOUR_HOME with output of: echo $HOME
+       - Replace YOUR_CLAUDE_DIR with the directory from: which claude
+       - Replace YOUR_NODE_DIR with the directory from: which node
+
+    2. Copy to LaunchAgents:
+       cp com.pr-reviewer.plist ~/Library/LaunchAgents/
+
+    3. Load:
+       launchctl load ~/Library/LaunchAgents/com.pr-reviewer.plist
+
+    4. Verify (exit code should be 0):
+       launchctl list | grep reviewer
+
+    5. Stop:
+       launchctl unload ~/Library/LaunchAgents/com.pr-reviewer.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.pr-reviewer</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>YOUR_NODE_PATH</string>
+        <string>YOUR_HOME/pr-reviewer/reviewer.js</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>YOUR_HOME/pr-reviewer</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>YOUR_HOME/pr-reviewer/launchd-stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>YOUR_HOME/pr-reviewer/launchd-stderr.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>YOUR_NODE_DIR:YOUR_CLAUDE_DIR:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+    </dict>
+</dict>
+</plist>

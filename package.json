@@ -1,0 +1,21 @@
+{
+  "name": "pr-reviewer",
+  "version": "1.0.0",
+  "description": "Automated PR review using Claude Code. Polls GitHub for open PRs, runs security, code quality, and test quality reviews, and posts results as PR comments.",
+  "main": "reviewer.js",
+  "scripts": {
+    "start": "node reviewer.js",
+    "dev": "DEBUG=1 node reviewer.js"
+  },
+  "keywords": [
+    "code-review",
+    "github",
+    "claude",
+    "automation",
+    "pr-review"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.4.7"
+  }
+}
