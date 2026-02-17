@@ -3,3 +3,4 @@ node_modules/
 review-state.json
 *.log
 .tmp-comment-*
+private-key.pem

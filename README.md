@@ -1,6 +1,6 @@
 # PR Reviewer
 
-Automated pull request review powered by Claude Code. Polls GitHub for open PRs, runs three specialized review agents (security, code quality, test quality), and posts results as PR comments. Optionally notifies a Discord channel with a summary.
+Automated pull request review powered by Claude Code. Runs specialized review agents on every PR, posts inline comments on specific lines, responds to conversations, and auto-fixes issues on command. Optionally notifies Discord with summaries.
 
 Built to run on a local machine alongside a Claude Max subscription. No API keys or per-review costs.
 
@@ -8,29 +8,44 @@ Built to run on a local machine alongside a Claude Max subscription. No API keys
 
 ## How It Works
 
-A Node.js script runs on your machine and polls GitHub for open pull requests at a configurable interval. When it finds a new or updated PR, it fetches the diff and runs three separate reviews through Claude Code (`claude -p`), each using a specialized rubric prompt. The results are posted as individual comments on the PR using the GitHub CLI.
+A Node.js script runs on your machine and polls GitHub for open pull requests. When it finds a new or updated PR with a `review` label, it fetches the diff and runs three specialized reviews through Claude Code. Results are posted as inline review comments on specific files and lines using the GitHub API. The reviewer then monitors PR comments for commands and questions.
 
 ```
-Poll GitHub (gh pr list)
-   |
-   v
-New/updated PR found
-   |
-   v
-Fetch diff (gh pr diff)
-   |
-   ├── Security Review ──────> claude -p (security rubric + diff)
-   ├── Code Quality Review ──> claude -p (code quality rubric + diff)
-   └── Test Quality Review ──> claude -p (test quality rubric + diff)
-   |
-   v
-Post comments (gh pr comment)
-   |
-   v
-Notify Discord (optional)
+Poll GitHub (gh pr list --label review)
+   │
+   ├─ New/updated PR found
+   │   │
+   │   ├── Fetch diff (gh pr diff)
+   │   │
+   │   ├── Security Review ──────> claude -p (security rubric + diff)
+   │   ├── Code Quality Review ──> claude -p (code quality rubric + diff)
+   │   └── Test Quality Review ──> claude -p (test quality rubric + diff)
+   │   │
+   │   ├── Post inline comments (GitHub API)
+   │   ├── Post summary comment
+   │   └── Notify Discord
+   │
+   └─ Poll comments on reviewed PRs
+       │
+       ├── !fix     → Auto-fix the specific issue, commit, push
+       ├── !fix-lint → Run ruff + eslint --fix, commit, push
+       ├── !review   → Re-trigger a full review
+       └── Question  → Claude responds naturally in-thread
 ```
 
-When new commits are pushed to a reviewed PR, the reviewer detects the updated timestamp and runs a fresh review automatically.
+---
+
+## Features
+
+**Inline review comments** — Findings are posted on the exact file and line, not as one big comment. Each finding becomes its own conversation thread.
+
+**Interactive commands** — Reply `!fix` to any finding and Claude will fix that specific issue, commit, and push. Use `!fix-lint` to auto-fix all linting issues across the PR.
+
+**Bot identity** — When configured as a GitHub App, reviews post under a dedicated bot account with a `[bot]` badge, keeping bot activity visually distinct from human comments.
+
+**Discord notifications** — Get notified when reviews complete, fixes are pushed, or comments are replied to. Pairs with the [Discord Claude Bridge](https://github.com/connor-worthen4/discord-claude-bridge) for a mobile workflow.
+
+**Re-reviews** — When new commits are pushed to a reviewed PR, the reviewer detects the change and runs fresh reviews automatically.
 
 ---
 
@@ -38,43 +53,22 @@ When new commits are pushed to a reviewed PR, the reviewer detects the updated t
 
 ### Security Review
 
-Evaluates the diff for vulnerabilities and security misconfigurations. Findings are categorized by severity.
+Evaluates the diff for vulnerabilities and security misconfigurations, categorized by severity.
 
-**Critical** (must fix): hardcoded secrets, SQL injection, auth bypass, remote code execution, path traversal.
-
-**High** (should fix): missing input validation, permissive CORS, sensitive data in error messages, insecure password handling.
-
-**Medium** (fix soon): vulnerable dependencies, verbose error messages, missing HTTPS enforcement, logged PII.
-
-**Low** (suggestion): opportunities for defense-in-depth, stricter types, tighter configuration.
+- **Critical**: hardcoded secrets, SQL injection, auth bypass, remote code execution, path traversal
+- **High**: missing input validation, permissive CORS, sensitive data in error messages
+- **Medium**: vulnerable dependencies, verbose error messages, missing HTTPS, logged PII
+- **Low**: opportunities for defense-in-depth, stricter types, tighter configuration
 
 Includes AWS-specific checks for IAM permissions, Lambda environment variables, API Gateway authentication, and S3 bucket policies.
 
 ### Code Quality Review
 
-Evaluates architecture, readability, reusability, error handling, and performance.
-
-**Architecture**: Does the change follow existing patterns? Is business logic in the right layer? Would this scale?
-
-**Readability**: Are names meaningful? Is control flow clear? Are comments present where needed?
-
-**Reusability**: Is there duplicated logic? Are functions parameterized appropriately? Are components composable?
-
-**Error handling**: What happens when external services fail? Are errors caught at the right level?
-
-**Performance**: N+1 queries, unnecessary data fetching, missing indexes, frontend re-renders, unpaginated lists.
+Evaluates architecture, readability, reusability, error handling, and performance. Checks for proper separation of concerns, meaningful naming, duplicated logic, unhandled failures, N+1 queries, and unnecessary re-renders.
 
 ### Test Quality Review
 
-Evaluates test completeness, assertion quality, isolation, and missing coverage. Focused on backend Python tests using pytest.
-
-**Coverage**: Are all branches tested? Are success, failure, and edge cases covered?
-
-**Assertions**: Are tests checking specific values or just "not None"? Would the test break if behavior changed?
-
-**Isolation**: Can tests run independently? Are external services mocked? Are mocks scoped correctly?
-
-**Missing coverage**: What scenarios exist in the code but have no corresponding test?
+Evaluates test completeness, assertion quality, and isolation. Focused on backend Python tests using pytest. Identifies missing coverage for branches, edge cases, and error paths. Flags weak assertions and improper mocking.
 
 ---
 
@@ -104,14 +98,26 @@ cp .env.example .env
 nano .env
 ```
 
-Required:
-- `GITHUB_REPOS` -- comma-separated list of repos to watch (e.g. `yourname/project`)
-- `CLAUDE_PATH` -- absolute path to the claude binary (find with `which claude`)
+**Required:**
 
-Optional:
-- `POLL_INTERVAL_MS` -- how often to check for PRs in milliseconds (default: 180000 = 3 minutes)
-- `DISCORD_BOT_TOKEN` and `DISCORD_CHANNEL_ID` -- for Discord notifications (see Discord Notifications below)
-- `DEBUG` -- set to `1` for verbose logging
+- `GITHUB_REPOS` — comma-separated repos to watch (e.g. `yourname/project`)
+- `CLAUDE_PATH` — absolute path to the claude binary (find with `which claude`)
+- `GITHUB_USERNAME` — your GitHub username (used to filter bot's own comments)
+
+**Optional:**
+
+- `POLL_INTERVAL_MS` — poll interval in milliseconds (default: 180000 = 3 minutes)
+- `DISCORD_BOT_TOKEN` and `DISCORD_CHANNEL_ID` — for Discord notifications
+- `PROJECT_DIRS` — maps repos to local paths for `!fix` commands (e.g. `yourname/project=/Users/you/projects/project`)
+- `DEBUG` — set to `1` for verbose logging
+
+**GitHub App (optional, for bot identity):**
+
+- `GITHUB_APP_ID` — your GitHub App's ID
+- `GITHUB_APP_INSTALLATION_ID` — the installation ID for your account
+- `GITHUB_APP_PRIVATE_KEY_PATH` — path to the `.pem` private key file
+
+See [USAGE.md](USAGE.md) for detailed setup instructions including GitHub App creation and the full development workflow.
 
 ### 3. Test
 
@@ -119,76 +125,39 @@ Optional:
 node reviewer.js
 ```
 
-If you have an open PR on one of your configured repos, it should pick it up within the first poll cycle. Check the PR on GitHub for review comments.
+If you have an open PR with the `review` label on one of your configured repos, it should pick it up within the first poll cycle.
 
 ---
 
 ## Running Persistently
 
-### Option A: launchd (macOS, recommended)
+### launchd (macOS, recommended)
 
-launchd auto-starts the reviewer on boot and restarts it if it crashes. A template plist file (`com.pr-reviewer.plist`) is included in this repo.
+A template plist file is included. launchd auto-starts the reviewer on boot and restarts it if it crashes.
 
 ```bash
-# Edit the plist with your actual paths (see comments inside the file)
-nano com.pr-reviewer.plist
-
-# Copy it to LaunchAgents
+nano com.pr-reviewer.plist   # edit paths
 cp com.pr-reviewer.plist ~/Library/LaunchAgents/
-
-# Start it
 launchctl load ~/Library/LaunchAgents/com.pr-reviewer.plist
-
-# Verify it is running (exit code should be 0)
-launchctl list | grep reviewer
-
-# Stop it
-launchctl unload ~/Library/LaunchAgents/com.pr-reviewer.plist
 ```
 
-### Option B: tmux
+### tmux
 
 ```bash
 chmod +x start.sh stop.sh
 ./start.sh
 ```
 
-### Option C: Direct
-
-```bash
-node reviewer.js
-```
-
 ---
 
-## Watching Multiple Repos
+## Commands
 
-Add repos to `GITHUB_REPOS` in `.env`, comma-separated:
-
-```
-GITHUB_REPOS=yourname/project1,yourname/project2,yourname/project3
-```
-
-Each repo is polled independently. PRs must target the `dev` branch to be reviewed.
-
----
-
-## Discord Notifications
-
-The reviewer can send a summary to a Discord channel when reviews complete. This pairs with the [Discord Claude Bridge](https://github.com/connor-worthen4/discord-claude-bridge), which lets you control Claude Code from your phone via Discord messages. Together, you get a full workflow: text Claude to build a feature, it creates a PR, the reviewer posts the results, and you get notified in the same Discord channel.
-
-To enable notifications, add `DISCORD_BOT_TOKEN` and `DISCORD_CHANNEL_ID` to `.env`. If you already have the Discord Claude Bridge running, use the same bot token and channel ID.
-
-Example notification:
-
-```
-PR #5 reviewed (yourname/project)
-Add rate limiting to API endpoints
-Security: passed
-Code Quality: passed with suggestions
-Test Quality: changes requested
-https://github.com/yourname/project/pull/5
-```
+| Command | Where | What it does |
+|---------|-------|-------------|
+| `!review` | PR comment | Adds the `review` label to trigger a fresh review |
+| `!fix` | Reply to inline finding | Fixes that specific issue, commits, and pushes |
+| `!fix-lint` | PR comment | Runs ruff + eslint auto-fix across the branch |
+| Any text | Reply to inline finding | Claude responds naturally to questions or discussion |
 
 ---
 
@@ -203,27 +172,20 @@ prompts/
   test-quality-review.md
 ```
 
-Each file contains the full rubric that gets sent to Claude along with the PR diff. The included rubrics are a general template currently pointed at a stack using AWS, Python, Next.js, and React. Edit the prompt files to adapt them for your stack and standards.
-
-Changes take effect on the next poll cycle. No restart needed.
+Each file contains the full rubric sent to Claude along with the PR diff. Edit the prompt files to adapt them for your stack and standards. Changes take effect on the next poll cycle.
 
 ### Improving Prompts Over Time
 
-The rubrics improve through iteration. When a review agent produces a false positive or misses something you catch manually, update the rubric:
+When a review agent produces a false positive or misses something:
 
-- **False positive**: Add an exception or clarification. For example, if the security agent keeps flagging test fixtures as hardcoded credentials, add "Test fixtures with obvious fake values (e.g. test@example.com, password123) are acceptable in test files."
-- **Missed issue**: Add the pattern as an explicit check under the relevant section.
-- **Wrong severity**: Move it to the correct category.
-- **Too verbose or too terse**: Adjust the response format section.
-
-Over time the rubrics become a comprehensive, battle-tested specification of your standards.
+- **False positive** — add an exception or clarification to the rubric
+- **Missed issue** — add the pattern as an explicit check
+- **Wrong severity** — move it to the correct category
 
 ### Adding New Review Agents
 
-To add a fourth review agent (e.g. documentation review, accessibility review):
-
-1. Create a new prompt file in `prompts/` (e.g. `docs-review.md`)
-2. Add an entry to the `REVIEW_TYPES` array in `reviewer.js`:
+1. Create a new prompt file in `prompts/`
+2. Add an entry to `REVIEW_TYPES` in `reviewer.js`:
 
 ```javascript
 { name: "docs", file: "docs-review.md", label: "Documentation" }
@@ -233,32 +195,13 @@ To add a fourth review agent (e.g. documentation review, accessibility review):
 
 ---
 
-## Re-reviews
-
-The reviewer tracks the `updatedAt` timestamp for each PR. When new commits are pushed, it detects the change on the next poll cycle and runs all three reviews again. New comments are posted and old review comments remain for history.
-
-To force a re-review of all PRs (e.g. after updating rubrics):
-
-```bash
-echo '{}' > ~/pr-reviewer/review-state.json
-```
-
-State is stored in `review-state.json` and automatically cleaned up after 30 days.
-
----
-
 ## Logs
 
 ```bash
-# Application logs
-tail -f ~/pr-reviewer/reviewer.log
-
-# launchd logs
-tail -f ~/pr-reviewer/launchd-stdout.log
-tail -f ~/pr-reviewer/launchd-stderr.log
-
-# Debug mode
-DEBUG=1 node reviewer.js
+tail -f ~/pr-reviewer/reviewer.log        # application logs
+tail -f ~/pr-reviewer/launchd-stdout.log   # launchd stdout
+tail -f ~/pr-reviewer/launchd-stderr.log   # launchd stderr
+DEBUG=1 node reviewer.js                   # debug mode
 ```
 
 ---
